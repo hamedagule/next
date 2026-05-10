@@ -37,7 +37,7 @@
 // of an offline exit node is that ChatGPT/Claude/Grok stop working;
 // other sites are unaffected.
 
-const PSK = "62c58884c211cb4b601276570172c2b2a4989d71a4b11732c5c2975a02ccbca7";
+const PSK = "CHANGE_ME_TO_A_STRONG_SECRET";
 
 // Headers the client may send that must NOT be forwarded to the
 // destination — they're hop-by-hop or would break re-encoding.
@@ -81,7 +81,7 @@ function sanitizeHeaders(h: unknown): Record<string, string> {
   return out;
 }
 
-async function handler(req: Request): Promise<Response> {
+export default async function (req: Request): Promise<Response> {
   // Fail closed on the placeholder PSK so a fresh deploy without setup
   // can't accidentally serve as an open relay.
   if (PSK === "CHANGE_ME_TO_A_STRONG_SECRET") {
@@ -146,9 +146,20 @@ async function handler(req: Request): Promise<Response> {
       redirect: "manual",
     });
 
+    // `fetch()` (Deno / Bun / Node) auto-decompresses gzip / br / deflate
+    // responses, so `resp.arrayBuffer()` returns plain bytes — but the
+    // destination's `Content-Encoding` header is still on `resp.headers`.
+    // Forwarding it would tell the client browser "this body is gzipped"
+    // when it isn't, producing `Content Encoding Error` (#964). Same goes
+    // for `Content-Length` — the post-decompression byte count is
+    // different from what the destination announced. Strip both. The
+    // Apps Script + Rust transport layer below us re-frames the wire body
+    // anyway, so neither header is meaningful to forward.
     const data = new Uint8Array(await resp.arrayBuffer());
     const respHeaders: Record<string, string> = {};
     resp.headers.forEach((value, key) => {
+      const lower = key.toLowerCase();
+      if (lower === "content-encoding" || lower === "content-length") return;
       respHeaders[key] = value;
     });
 
@@ -162,4 +173,3 @@ async function handler(req: Request): Promise<Response> {
     return Response.json({ e: message }, { status: 500 });
   }
 }
-Deno.serve(handler);
